@@ -1,40 +1,4 @@
-//! # Template Pallet
-//!
-//! A pallet with minimal functionality to help developers understand the essential components of
-//! writing a FRAME pallet. It is typically used in beginner tutorials or in Substrate template
-//! nodes as a starting point for creating a new pallet and **not meant to be used in production**.
-//!
-//! ## Overview
-//!
-//! This template pallet contains basic examples of:
-//! - declaring a storage item that stores a single `u32` value
-//! - declaring and using events
-//! - declaring and using errors
-//! - a dispatchable function that allows a user to set a new value to storage and emits an event
-//!   upon success
-//! - another dispatchable function that causes a custom error to be thrown
-//!
-//! Each pallet section is annotated with an attribute using the `#[pallet::...]` procedural macro.
-//! This macro generates the necessary code for a pallet to be aggregated into a FRAME runtime.
-//!
-//! Learn more about FRAME macros [here](https://docs.substrate.io/reference/frame-macros/).
-//!
-//! ### Pallet Sections
-//!
-//! The pallet sections in this template are:
-//!
-//! - A **configuration trait** that defines the types and parameters which the pallet depends on
-//!   (denoted by the `#[pallet::config]` attribute). See: [`Config`].
-//! - A **means to store pallet-specific data** (denoted by the `#[pallet::storage]` attribute).
-//!   See: [`storage_types`].
-//! - A **declaration of the events** this pallet emits (denoted by the `#[pallet::event]`
-//!   attribute). See: [`Event`].
-//! - A **declaration of the errors** that this pallet can throw (denoted by the `#[pallet::error]`
-//!   attribute). See: [`Error`].
-//! - A **set of dispatchable functions** that define the pallet's functionality (denoted by the
-//!   `#[pallet::call]` attribute). See: [`dispatchables`].
-//!
-//! Run `cargo doc --package pallet-template --open` to view this pallet's documentation.
+//! Pallet-Project.
 
 // We make sure this pallet uses `no_std` for compiling to Wasm.
 #![cfg_attr(not(feature = "std"), no_std)]
@@ -60,6 +24,63 @@ mod benchmarking;
 pub mod weights;
 pub use weights::*;
 
+/// Funding options tailored to meet the needs of diverse proj-, change to SpendOrigin.
+/// ects and investor interests.
+#[derive(Encode, Decode, Copy, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
+pub enum Funding {
+	Donation,
+	Rewards,
+	Equity,
+	Milestone,
+}
+
+/// The state of the payment claim.
+#[cfg_attr(feature = "std", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Encode, Decode, Clone, PartialEq, Eq, MaxEncodedLen, RuntimeDebug, TypeInfo)]
+pub enum PaymentState {
+	/// Pending claim.
+	Pending,
+	/// Payment attempted with a payment identifier.
+	Attempted,
+	/// Payment failed.
+	Failed,
+}
+
+/// Info regarding an approved treasury spend.
+#[cfg_attr(feature = "std", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Encode, Decode, Clone, PartialEq, Eq, MaxEncodedLen, RuntimeDebug, TypeInfo)]
+pub struct SpendStatus<Balance, Beneficiary, BlockNumber> {
+	// The kind of asset to be spent.
+	asset_kind: AssetKind,
+	/// The asset amount of the spend.
+	amount: Balance,
+	/// The beneficiary of the spend.
+	beneficiary: Beneficiary,
+	/// The block number from which the spend can be claimed.
+	valid_from: BlockNumber,
+	/// The block number by which the spend has to be claimed.
+	expire_at: BlockNumber,
+	/// The status of the payout/claim.
+	status: PaymentState,
+}
+
+/// An index of a proposal. Just a `u32`.
+pub type ProposalIndex = u32;
+
+/// A spending proposal.
+#[cfg_attr(feature = "std", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Encode, Decode, Clone, PartialEq, Eq, MaxEncodedLen, RuntimeDebug, TypeInfo)]
+pub struct Proposal<AccountId, Balance> {
+	/// The account proposing it.
+	proposer: AccountId,
+	/// The (total) amount that should be paid if the proposal is accepted.
+	value: Balance,
+	/// The account to whom the payment should be made if the proposal is accepted.
+	beneficiary: AccountId,
+	/// The amount held on deposit (reserved) for making this proposal.
+	bond: Balance,
+}
+
 // All pallet logic is defined in its own module and must be annotated by the `pallet` attribute.
 #[frame_support::pallet]
 pub mod pallet {
@@ -80,123 +101,266 @@ pub mod pallet {
 	/// `runtime/src/lib.rs` file of your chain.
 	#[pallet::config]
 	pub trait Config: frame_system::Config {
+
+		/// Impl default here.
+		/// Not an instantiable pallet(I is void here)
 		/// The overarching runtime event type.
 		type RuntimeEvent: From<Event<Self>> + IsType<<Self as frame_system::Config>::RuntimeEvent>;
 		/// A type representing the weights required by the dispatchables of this pallet.
 		type WeightInfo: WeightInfo;
+
+		//type Polls: Polling<TallyOf<Self, I>, Votes = Votes, Moment = BlockNumberFor<Self>>;
+
+		type Currency: Currency<Self::AccountId> + ReservableCurrency<Self::AccountId>;
+
+		type RejectOrigin: EnsureOrigin<Self::RuntimeOrigin>;
+
+		type SpendPeriod: Get<BlockNumberFor<Self>;
+
+		type Burn: Get<Permill>;
+
+		type PalletId: Get<PalletId>;
+
+		type BurnDestination: OnUnbalanced<NegativeImbalanceOf<Self>;
+
+		type SpendFunds: SpendFunds<Self>;
+
+		type MaxApprovals: Get<u32>;
+
+		type SpendOrigin: EnsureOrigin<Self::RuntimeOrigin, Success = BalanceOf<Self>>;
+
+		type Beneficiary: Parameter + MaxEncodedLen;
+
+		type Paymaster: Pay<Beneficiary = Self::Beneficiary, AssetKind = Self::Currency>;
+
+		type PayoutPeriod: Get<BlockNumberFor<Self>;
+
+		type BlockNumberProvider: BlockNumberProvider;
 	}
 
-	/// A storage item for this pallet.
-	///
-	/// In this template, we are declaring a storage item called `Something` that stores a single
-	/// `u32` value. Learn more about runtime storage here: <https://docs.substrate.io/build/runtime-storage/>
+	/// Number of proposals that have been made.
 	#[pallet::storage]
-	pub type Something<T> = StorageValue<_, u32>;
+	pub type ProposalCount<T> = StorageValue<_, ProposalIndex, ValueQuery>;
 
-	/// Events that functions in this pallet can emit.
-	///
-	/// Events are a simple means of indicating to the outside world (such as dApps, chain explorers
-	/// or other users) that some notable update in the runtime has occurred. In a FRAME pallet, the
-	/// documentation for each event field and its parameters is added to a node's metadata so it
-	/// can be used by external interfaces or tools.
-	///
-	///	The `generate_deposit` macro generates a function on `Pallet` called `deposit_event` which
-	/// will convert the event type of your pallet into `RuntimeEvent` (declared in the pallet's
-	/// [`Config`] trait) and deposit it using [`frame_system::Pallet::deposit_event`].
-	#[pallet::event]
-	#[pallet::generate_deposit(pub(super) fn deposit_event)]
-	pub enum Event<T: Config> {
-		/// A user has successfully set a new value.
-		SomethingStored {
-			/// The new value set.
-			something: u32,
-			/// The account who set the new value.
-			who: T::AccountId,
-		},
+	/// Proposals that have been made. by managers... there have to be accepted intp the system
+	#[pallet::storage]
+	pub type Proposals<T: Config> = StorageMap<
+		_,
+		Twox64Concat,
+		ProposalIndex,
+		Twox64Concat,
+		AccountId,
+		Proposal<T::AccountId, BalanceOf<T>>,
+		OptionQuery,
+	>;
+
+	/// The amount which has been reported as inactive to Currency.
+	#[pallet::storage]
+	pub type Deactivated<T: Config> =
+		StorageValue<_, BalanceOf<T>, ValueQuery>;
+
+	/// Proposal indices that have been approved but not yet awarded.
+	#[pallet::storage]
+	pub type Approvals<T> =
+		StorageValue<_, BoundedVec<ProposalIndex, T::MaxApprovals>, ValueQuery>;
+
+	/// The count of spends that have been made.
+	#[pallet::storage]
+	pub(crate) type SpendCount<T> = StorageValue<_, SpendIndex, ValueQuery>;
+
+	/// Spends that have been approved and being processed.
+	// Hasher: Twox safe since `SpendIndex` is an internal count based index.
+	#[pallet::storage]
+	pub type Spends<T: Config> = StorageMap<
+		_,
+		Twox64Concat,
+		SpendIndex,
+		SpendStatus<
+			BalanceOf<T>,
+			T::Beneficiary,
+			BlockNumberFor<T>,
+		>,
+		OptionQuery,
+	>;
+
+	/// The blocknumber for the last triggered spend period.
+	#[pallet::storage]
+	pub(crate) type LastSpendPeriod<T> = StorageValue<_, BlockNumberFor<T>, OptionQuery>;
+
+	/// Add managers, only managers can decide to post a proposal, 
+	/// Adding managers has to be a root or governance descision.
+	/// Restric managers to their funding type.
+	/// funding type can only be changed by root or governance vote in the democracy pallet.
+	/// Root is sudo for testing.
+	/// Project Id is proposal Id.
+	/// Max proposals by funding type.. funding type is another key.
+	/// Max proposal per total emissions from treasury for that emmission period.
+	/// If the balance of the allowed treasuty emmision execed the max potential payout from
+	/// proposals then no proposals get initiated for that emision period.
+	/// vettoed proposal the lockup balance geos back into the treasury.
+	/// amount to be funded back into the treasury once your milestones are met.
+	/// Once your funding type is set you can't change it until all proposals close and governance votes for the change.
+	#[pallet::storage]
+	pub type Managers<T> = StorageDoubleMap<_, Twox64Concat, T::AccountId, Twox64Concat, Funding, Vec<Proposal<T::AccountId, BalanceOf<T>>>, ValueQuery>;
+
+	#[pallet::genesis_config]
+	#[derive(frame_support::DefaultNoBound)]
+	pub struct GenesisConfig<T> {
+		#[serde(skip)]
+		_config: core::marker::PhantomData<T>,
 	}
 
-	/// Errors that can be returned by this pallet.
-	///
-	/// Errors tell users that something went wrong so it's important that their naming is
-	/// informative. Similar to events, error documentation is added to a node's metadata so it's
-	/// equally important that they have helpful documentation associated with them.
-	///
-	/// This type of runtime error can be up to 4 bytes in size should you want to return additional
-	/// information.
-	#[pallet::error]
-	pub enum Error<T> {
-		/// The value retrieved was `None` as no value was previously set.
-		NoneValue,
-		/// There was an attempt to increment the value in storage over `u32::MAX`.
-		StorageOverflow,
-	}
-
-	/// The pallet's dispatchable functions ([`Call`]s).
-	///
-	/// Dispatchable functions allows users to interact with the pallet and invoke state changes.
-	/// These functions materialize as "extrinsics", which are often compared to transactions.
-	/// They must always return a `DispatchResult` and be annotated with a weight and call index.
-	///
-	/// The [`call_index`] macro is used to explicitly
-	/// define an index for calls in the [`Call`] enum. This is useful for pallets that may
-	/// introduce new dispatchables over time. If the order of a dispatchable changes, its index
-	/// will also change which will break backwards compatibility.
-	///
-	/// The [`weight`] macro is used to assign a weight to each call.
-	#[pallet::call]
-	impl<T: Config> Pallet<T> {
-		/// An example dispatchable that takes a single u32 value as a parameter, writes the value
-		/// to storage and emits an event.
-		///
-		/// It checks that the _origin_ for this call is _Signed_ and returns a dispatch
-		/// error if it isn't. Learn more about origins here: <https://docs.substrate.io/build/origins/>
-		#[pallet::call_index(0)]
-		#[pallet::weight(T::WeightInfo::do_something())]
-		pub fn do_something(origin: OriginFor<T>, something: u32) -> DispatchResult {
-			// Check that the extrinsic was signed and get the signer.
-			let who = ensure_signed(origin)?;
-
-			// Update storage.
-			Something::<T>::put(something);
-
-			// Emit an event.
-			Self::deposit_event(Event::SomethingStored { something, who });
-
-			// Return a successful `DispatchResult`
-			Ok(())
-		}
-
-		/// An example dispatchable that may throw a custom error.
-		///
-		/// It checks that the caller is a signed origin and reads the current value from the
-		/// `Something` storage item. If a current value exists, it is incremented by 1 and then
-		/// written back to storage.
-		///
-		/// ## Errors
-		///
-		/// The function will return an error under the following conditions:
-		///
-		/// - If no value has been set ([`Error::NoneValue`])
-		/// - If incrementing the value in storage causes an arithmetic overflow
-		///   ([`Error::StorageOverflow`])
-		#[pallet::call_index(1)]
-		#[pallet::weight(T::WeightInfo::cause_error())]
-		pub fn cause_error(origin: OriginFor<T>) -> DispatchResult {
-			let _who = ensure_signed(origin)?;
-
-			// Read a value from storage.
-			match Something::<T>::get() {
-				// Return an error if the value has not been set.
-				None => Err(Error::<T>::NoneValue.into()),
-				Some(old) => {
-					// Increment the value read from storage. This will cause an error in the event
-					// of overflow.
-					let new = old.checked_add(1).ok_or(Error::<T>::StorageOverflow)?;
-					// Update the value in storage with the incremented result.
-					Something::<T>::put(new);
-					Ok(())
-				},
+	#[pallet::genesis_build]
+	impl<T: Config> BuildGenesisConfig for GenesisConfig<T> {
+		fn build(&self) {
+			// Create Treasury account
+			let account_id = Pallet::<T>::account_id();
+			let min = T::Currency::minimum_balance();
+			if T::Currency::free_balance(&account_id) < min {
+				let _ = T::Currency::make_free_balance_be(&account_id, min);
 			}
 		}
+	}
+
+	pub enum Event<T: Config> {
+
+		Spending,
+
+		Awarded,
+
+		Burnt,
+
+		Rollover
+
+		Deposit,
+
+		SpendApproved,
+
+		UpdatedInactive { reactivated: BalanceOf<T>, deactivated: BalanceOf<T>},
+
+		Paid,
+
+		PaymentFailed,
+
+		SpendProcessed,
+	}
+
+
+	pub enum Error<T> {
+		InvalidIndex,
+
+		TooManyApprovals,
+
+		InsufficientFunds,
+
+		ProposalNotApproved,
+
+		FailedToConvertBalance,
+
+		SpendExpired,
+
+		EarlyPayout,
+
+		AlreadyAttempted,
+
+		PayoutError,
+
+		NotAttempted,
+
+		Inconclusive,
+	}
+
+	#[pallet::hooks]
+	impl<T> Hooks<BlockNumberFor> for Pallet<T> {
+		fn on_initialize(n: BlockNumberFor<T>) -> Weight {
+			let pot = Self::pot();
+			let deactivated = Deactivated::<T>::get();
+			if pot != deactivated { // what are this conditionla case would apply?
+				T::Currency::reactivate(deactivated); // what are the cases where one would deactivate funds?
+				T:;Currency::deactivate(pot); // what are the cases where pot would be deactivated?
+				Deactivated::<T>::put(pot); //Why would pot be placed in deactivated Storage?
+				Self::deposit_event(Event::<T>::UpdatedInactive {
+					reactivated: deactivated,
+					deactivated: pot,
+				});
+			}
+
+			let last_spend_period = LastSpendPeriod::<T>::get().unwrap_or_else(|| Self::update_last_spend_period());
+			let blocks_since_last_spend_period = block_number.saturating_sub(last_spend_period);
+			let safe_spend_period = T::SpendPeriod::get().max(BlockNumberFor::<T>::one());
+
+			// Safe because of `max(1)` above.
+			let (spend_periods_passed, extra_blocks) = (
+				blocks_since_last_spend_period / safe_spend_period,
+				blocks_since_last_spend_period % safe_spend_period,
+			);
+			let new_last_spend_period = block_number.saturating_sub(extra_blocks);
+			if spend_periods_passed > BlockNumberFor::<T>::zero() {
+				Self::spend_funds(spend_periods_passed, new_last_spend_period)
+			} else {
+				Weight::zero()
+			}
+		}
+			
+		#[cfg(feature = "try-runtime")]
+		fn try_state(_: BlockNumberFor<T>) -> Result<(), sp_runtime::TryRuntimeError> {
+			Self::do_try_state()?;
+			Ok(())
+		}
+	}
+
+	// what is spendcontex in the context of the runtime?
+	#[derive(Default)]
+	struct SpendContext<Balance> {
+		spend_in_context: BTreeMap<Balance, Balance>,
+	}
+
+	#[pallet::call]
+	impl<T: Config> Pallet<T> {
+
+		// The funding manager should drop a compeling proposal for funding.
+		// and have an amount 75% of the total requested funds that are locked and be vested into the treasury 
+		/// when delivering the propsal at the required date fails.
+		// at every milestone delivery date a percentace of the locked up funds are given to treasury swquentially until zero
+		// and proposal is vettoed.
+		// if a milestone is deliverd before the end date of amounts are gradually retured.
+
+		pub fn add_manager(
+			origin: OriginFor<T>,
+			manager: AccountId,
+			type: Funding,
+		) -> DispatchResult {
+			T::AdminOrigin::ensure_origin(origin)?;
+
+		}
+
+		pub fn remove_manager(
+			origin: OriginFor<T>, 
+			manager: AccountId,
+			type: Funding,
+		) -> DispatchResult {
+			T::AdminOrigin::ensure_origin(origin)?;
+
+
+		}
+	}
+}
+
+impl<T: Config> Pallet<T> {
+
+	fn update_last_spend_period() -> BlockNumberFor<T, I> {
+		let block_number = T::BlockNumberProvider::current_block_number();
+		let spend_period = T::SpendPeriod::get().max(BlockNumberFor::<T, I>::one());
+		let time_since_last_spend = block_number % spend_period;
+		// If it happens that this logic runs directly on a spend period block, we need to backdate
+		// to the last spend period so a spend still occurs this block.
+		let last_spend_period = if time_since_last_spend.is_zero() {
+			block_number.saturating_sub(spend_period)
+		} else {
+			// Otherwise, this is the last time we had a spend period.
+			block_number.saturating_sub(time_since_last_spend)
+		};
+		LastSpendPeriod::<T, I>::put(last_spend_period);
+		last_spend_period
 	}
 }
