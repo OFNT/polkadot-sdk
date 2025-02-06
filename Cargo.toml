@@ -544,7 +544,7 @@ members = [
 	"templates/parachain/pallets/template",
 	"templates/parachain/runtime",
 	"templates/solochain/node",
-	"templates/solochain/pallets/template",
+	"templates/solochain/pallets/projects",
 	"templates/solochain/runtime",
 	"templates/zombienet",
 	"umbrella",
@@ -1001,7 +1001,7 @@ pallet-staking-runtime-api = { path = "substrate/frame/staking/runtime-api", def
 pallet-state-trie-migration = { path = "substrate/frame/state-trie-migration", default-features = false }
 pallet-statement = { default-features = false, path = "substrate/frame/statement" }
 pallet-sudo = { path = "substrate/frame/sudo", default-features = false }
-pallet-template = { path = "templates/solochain/pallets/template", default-features = false }
+pallet-projects = { path = "templates/solochain/pallets/projects", default-features = false }
 pallet-timestamp = { path = "substrate/frame/timestamp", default-features = false }
 pallet-tips = { path = "substrate/frame/tips", default-features = false }
 pallet-transaction-payment = { path = "substrate/frame/transaction-payment", default-features = false }

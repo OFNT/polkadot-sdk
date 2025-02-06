@@ -23,9 +23,30 @@ mod tests;
 mod benchmarking;
 pub mod weights;
 pub use weights::*;
+use core::marker::PhantomData;
 
-/// Funding options tailored to meet the needs of diverse proj-, change to SpendOrigin.
-/// ects and investor interests.
+extern crate alloc;
+
+use alloc::collections::btree_map::BTreeMap;
+
+use codec::{Decode, Encode, MaxEncodedLen};
+use scale_info::TypeInfo;
+use sp_runtime::{RuntimeDebug, Permill};
+use frame_support::{
+	traits::{ReservableCurrency, Currency, OnUnbalanced, tokens::Pay}, PalletId, weights::Weight
+};
+use frame_system::pallet_prelude::BlockNumberFor;
+
+pub type BalanceOf<T> =
+	<<T as Config>::Currency as Currency<<T as frame_system::Config>::AccountId>>::Balance;
+pub type PositiveImbalanceOf<T> = <<T as Config>::Currency as Currency<
+	<T as frame_system::Config>::AccountId,
+>>::PositiveImbalance;
+pub type NegativeImbalanceOf<T> = <<T as Config>::Currency as Currency<
+	<T as frame_system::Config>::AccountId,
+>>::NegativeImbalance;
+/// Funding options tailored to meet the needs of diverse projects
+/// and investor interests. This will be adapted to spend origin.
 #[derive(Encode, Decode, Copy, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
 pub enum Funding {
 	Donation,
@@ -46,12 +67,20 @@ pub enum PaymentState {
 	Failed,
 }
 
+#[impl_trait_for_tuples::impl_for_tuples(30)]
+pub trait SpendFunds<T: Config> {
+	fn spend_funds(
+		budget_remaining: &mut BalanceOf<T>,
+		imbalance: &mut PositiveImbalanceOf<T>,
+		total_weight: &mut Weight,
+		missed_any: &mut bool,
+	);
+}
+
 /// Info regarding an approved treasury spend.
 #[cfg_attr(feature = "std", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Encode, Decode, Clone, PartialEq, Eq, MaxEncodedLen, RuntimeDebug, TypeInfo)]
 pub struct SpendStatus<Balance, Beneficiary, BlockNumber> {
-	// The kind of asset to be spent.
-	asset_kind: AssetKind,
 	/// The asset amount of the spend.
 	amount: Balance,
 	/// The beneficiary of the spend.
@@ -81,12 +110,15 @@ pub struct Proposal<AccountId, Balance> {
 	bond: Balance,
 }
 
+/// Index of an approved treasury spend.
+pub type SpendIndex = u32;
+
 // All pallet logic is defined in its own module and must be annotated by the `pallet` attribute.
 #[frame_support::pallet]
 pub mod pallet {
 	// Import various useful types required by all FRAME pallets.
 	use super::*;
-	use frame_support::pallet_prelude::*;
+	use frame_support::{pallet_prelude::*, dispatch_context::with_context};
 	use frame_system::pallet_prelude::*;
 
 	// The `Pallet` struct serves as a placeholder to implement traits, methods and dispatchables
@@ -109,22 +141,23 @@ pub mod pallet {
 		/// A type representing the weights required by the dispatchables of this pallet.
 		type WeightInfo: WeightInfo;
 
-		//type Polls: Polling<TallyOf<Self, I>, Votes = Votes, Moment = BlockNumberFor<Self>>;
-
 		type Currency: Currency<Self::AccountId> + ReservableCurrency<Self::AccountId>;
 
 		type RejectOrigin: EnsureOrigin<Self::RuntimeOrigin>;
 
-		type SpendPeriod: Get<BlockNumberFor<Self>;
+		type SpendPeriod: Get<BlockNumberFor<Self>>;
+
+		type AdminOrigin: EnsureOrigin<Self::RuntimeOrigin>;
 
 		type Burn: Get<Permill>;
 
 		type PalletId: Get<PalletId>;
 
-		type BurnDestination: OnUnbalanced<NegativeImbalanceOf<Self>;
+		type BurnDestination: OnUnbalanced<NegativeImbalanceOf<Self>>;
 
 		type SpendFunds: SpendFunds<Self>;
 
+		#[pallet::constant]
 		type MaxApprovals: Get<u32>;
 
 		type SpendOrigin: EnsureOrigin<Self::RuntimeOrigin, Success = BalanceOf<Self>>;
@@ -133,9 +166,7 @@ pub mod pallet {
 
 		type Paymaster: Pay<Beneficiary = Self::Beneficiary, AssetKind = Self::Currency>;
 
-		type PayoutPeriod: Get<BlockNumberFor<Self>;
-
-		type BlockNumberProvider: BlockNumberProvider;
+		type PayoutPeriod: Get<BlockNumberFor<Self>>;
 	}
 
 	/// Number of proposals that have been made.
@@ -149,7 +180,7 @@ pub mod pallet {
 		Twox64Concat,
 		ProposalIndex,
 		Twox64Concat,
-		AccountId,
+		T::AccountId,
 		Proposal<T::AccountId, BalanceOf<T>>,
 		OptionQuery,
 	>;
@@ -161,7 +192,7 @@ pub mod pallet {
 
 	/// Proposal indices that have been approved but not yet awarded.
 	#[pallet::storage]
-	pub type Approvals<T> =
+	pub type Approvals<T: Config> =
 		StorageValue<_, BoundedVec<ProposalIndex, T::MaxApprovals>, ValueQuery>;
 
 	/// The count of spends that have been made.
@@ -185,23 +216,10 @@ pub mod pallet {
 
 	/// The blocknumber for the last triggered spend period.
 	#[pallet::storage]
-	pub(crate) type LastSpendPeriod<T> = StorageValue<_, BlockNumberFor<T>, OptionQuery>;
-
-	/// Add managers, only managers can decide to post a proposal, 
-	/// Adding managers has to be a root or governance descision.
-	/// Restric managers to their funding type.
-	/// funding type can only be changed by root or governance vote in the democracy pallet.
-	/// Root is sudo for testing.
-	/// Project Id is proposal Id.
-	/// Max proposals by funding type.. funding type is another key.
-	/// Max proposal per total emissions from treasury for that emmission period.
-	/// If the balance of the allowed treasuty emmision execed the max potential payout from
-	/// proposals then no proposals get initiated for that emision period.
-	/// vettoed proposal the lockup balance geos back into the treasury.
-	/// amount to be funded back into the treasury once your milestones are met.
-	/// Once your funding type is set you can't change it until all proposals close and governance votes for the change.
+	pub(crate) type LastSpendPeriod<T: Config> = StorageValue<_, BlockNumberFor<T>, OptionQuery>;
+	/// Managers allowed to submit proposals.
 	#[pallet::storage]
-	pub type Managers<T> = StorageDoubleMap<_, Twox64Concat, T::AccountId, Twox64Concat, Funding, Vec<Proposal<T::AccountId, BalanceOf<T>>>, ValueQuery>;
+	pub type Managers<T: Config> = StorageDoubleMap<_, Twox64Concat, T::AccountId, Twox64Concat, Funding, Vec<Proposal<T::AccountId, BalanceOf<T>>>, ValueQuery>;
 
 	#[pallet::genesis_config]
 	#[derive(frame_support::DefaultNoBound)]
@@ -213,7 +231,7 @@ pub mod pallet {
 	#[pallet::genesis_build]
 	impl<T: Config> BuildGenesisConfig for GenesisConfig<T> {
 		fn build(&self) {
-			// Create Treasury account
+			// Create pallet account
 			let account_id = Pallet::<T>::account_id();
 			let min = T::Currency::minimum_balance();
 			if T::Currency::free_balance(&account_id) < min {
@@ -222,6 +240,8 @@ pub mod pallet {
 		}
 	}
 
+	#[pallet::event]
+	#[pallet::generate_deposit(pub(super) fn deposit_event)]
 	pub enum Event<T: Config> {
 
 		Spending,
@@ -230,7 +250,7 @@ pub mod pallet {
 
 		Burnt,
 
-		Rollover
+		Rollover,
 
 		Deposit,
 
@@ -245,9 +265,13 @@ pub mod pallet {
 		SpendProcessed,
 	}
 
-
+	#[pallet::error]
 	pub enum Error<T> {
 		InvalidIndex,
+		/// Manager already exists for the given funding type.
+		AlreadyAManager,
+		/// Cannot remove a manager with active proposals.
+		ActiveProposalsExist,
 
 		TooManyApprovals,
 
@@ -271,13 +295,13 @@ pub mod pallet {
 	}
 
 	#[pallet::hooks]
-	impl<T> Hooks<BlockNumberFor> for Pallet<T> {
+	impl<T: Config> Hooks<BlockNumberFor<T>> for Pallet<T> {
 		fn on_initialize(n: BlockNumberFor<T>) -> Weight {
 			let pot = Self::pot();
 			let deactivated = Deactivated::<T>::get();
 			if pot != deactivated { // what are this conditionla case would apply?
 				T::Currency::reactivate(deactivated); // what are the cases where one would deactivate funds?
-				T:;Currency::deactivate(pot); // what are the cases where pot would be deactivated?
+				T::Currency::deactivate(pot); // what are the cases where pot would be deactivated?
 				Deactivated::<T>::put(pot); //Why would pot be placed in deactivated Storage?
 				Self::deposit_event(Event::<T>::UpdatedInactive {
 					reactivated: deactivated,
@@ -286,7 +310,7 @@ pub mod pallet {
 			}
 
 			let last_spend_period = LastSpendPeriod::<T>::get().unwrap_or_else(|| Self::update_last_spend_period());
-			let blocks_since_last_spend_period = block_number.saturating_sub(last_spend_period);
+			let blocks_since_last_spend_period = n.saturating_sub(last_spend_period);
 			let safe_spend_period = T::SpendPeriod::get().max(BlockNumberFor::<T>::one());
 
 			// Safe because of `max(1)` above.
@@ -294,7 +318,7 @@ pub mod pallet {
 				blocks_since_last_spend_period / safe_spend_period,
 				blocks_since_last_spend_period % safe_spend_period,
 			);
-			let new_last_spend_period = block_number.saturating_sub(extra_blocks);
+			let new_last_spend_period = n.saturating_sub(extra_blocks);
 			if spend_periods_passed > BlockNumberFor::<T>::zero() {
 				Self::spend_funds(spend_periods_passed, new_last_spend_period)
 			} else {
@@ -325,22 +349,93 @@ pub mod pallet {
 		// and proposal is vettoed.
 		// if a milestone is deliverd before the end date of amounts are gradually retured.
 
+		/// If a manager is already added and you want to change the funting tyoe of said manager.
+		#[pallet::call_index(0)]
+		#[pallet::weight(T::WeightInfo::add_manager())]
 		pub fn add_manager(
 			origin: OriginFor<T>,
-			manager: AccountId,
-			type: Funding,
+			manager: T::AccountId,
+			funding_type: Funding,
+			change: bool,
 		) -> DispatchResult {
+			// Ensure the caller is authorized
 			T::AdminOrigin::ensure_origin(origin)?;
 
+			if change {
+				let existing_manager: Vec<(T::AccountId, Vec<Proposals>)> = Managers::<T>::iter_prefix(&manager);
+			} else {
+				// Check if manager already exists for this funding type
+			ensure!(
+				!Managers::<T>::contains_key(&manager, &funding_type),
+				Error::<T>::AlreadyAManager
+			);
+			
+			// Insert new manager with empty proposals list
+			Managers::<T>::insert(&manager, funding_type, Vec::new());
+			
+			Ok(())
+			}
+
+			
 		}
 
+		#[pallet::call_index(1)]
+		#[pallet::weight(T::WeightInfo::remove_manager())]
 		pub fn remove_manager(
 			origin: OriginFor<T>, 
-			manager: AccountId,
-			type: Funding,
+			manager: T::AccountId,
+			funding_type: Funding,
 		) -> DispatchResult {
+			// Ensure the caller is authorized
 			T::AdminOrigin::ensure_origin(origin)?;
 
+			// Check for active proposals
+			let proposals = Managers::<T>::get(&manager, funding_type);
+			ensure!(
+				proposals.is_empty(),
+				Error::<T>::ActiveProposalsExist
+			);
+	
+			// Remove manager entry
+			Managers::<T>::remove(&manager, funding_type);
+	
+			Ok(())
+		}
+
+		#[pallet::call_index(2)]
+		#[pallet::weight(T::WeightInfo::spend_local())]
+		pub fn spend_local(
+			origin: OriginFor<T>,
+			#[pallet::compact] amount: BalanceOf<T>,
+			manager: T::AccountId,
+		) -> DispatchResult {
+			let max_amount = T::SpendOrigin::ensure_origin(origin)?;
+
+			ensure!(amount <= max_amount, Error::<T>::InsufficientPermission);
+
+			with_context::<SpendContext<BalanceOf<T>>, _>(|v| {
+				let context = v.or_default();
+
+
+				let spend = context.spend_in_context.entry(max_amount).or_defauot();
+
+				if spend.check_add(&amount).map(|s| s > max_amount).unwrap_or(true) {
+					Err(Error::<T>::InsufficientFunds)
+				} else {
+					*spend = spend.staurating_add(amount);
+
+					Ok(())
+				}
+			}).unwrap_or(Ok(()))?;
+
+			let proposal_index = ProposalCount::<T>::get();
+			let proposal = Proposal {
+				proposer: manager.clone(),
+				value: amount,
+				beneficiary: manager,
+				bond: amount.saturating_div(50), // 50% bond of the proposed amount.
+			};
+			ProposalCount::<T>::put(proposal_index + 1);
 
 		}
 	}
@@ -348,9 +443,9 @@ pub mod pallet {
 
 impl<T: Config> Pallet<T> {
 
-	fn update_last_spend_period() -> BlockNumberFor<T, I> {
+	fn update_last_spend_period() -> BlockNumberFor<T> {
 		let block_number = T::BlockNumberProvider::current_block_number();
-		let spend_period = T::SpendPeriod::get().max(BlockNumberFor::<T, I>::one());
+		let spend_period = T::SpendPeriod::get().max(BlockNumberFor::<T>::one());
 		let time_since_last_spend = block_number % spend_period;
 		// If it happens that this logic runs directly on a spend period block, we need to backdate
 		// to the last spend period so a spend still occurs this block.
@@ -360,7 +455,20 @@ impl<T: Config> Pallet<T> {
 			// Otherwise, this is the last time we had a spend period.
 			block_number.saturating_sub(time_since_last_spend)
 		};
-		LastSpendPeriod::<T, I>::put(last_spend_period);
+		LastSpendPeriod::<T>::put(last_spend_period);
 		last_spend_period
+	}
+}
+
+
+/// TypedGet implementation to get the AccountId of this pallet.
+pub struct ProjectAccountId<R>(PhantomData<R>);
+impl<R> sp_runtime::traits::TypedGet for ProjectAccountId<R>
+where
+	R: crate::Config,
+{
+	type Type = <R as frame_system::Config>::AccountId;
+	fn get() -> Self::Type {
+		crate::Pallet::<R>::account_id()
 	}
 }
