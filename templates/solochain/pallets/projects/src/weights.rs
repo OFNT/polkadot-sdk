@@ -37,6 +37,7 @@ pub trait WeightInfo {
 	fn add_manager() -> Weight;
 	fn remove_manager() -> Weight;
 	fn spend_local() -> Weight;
+	fn on_initialize_proposals(p: u32, ) -> Weight;
 }
 
 /// Weights for pallet_projects using the Substrate node and recommended hardware.
@@ -51,6 +52,17 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 	fn spend_local() -> Weight {
 		Weight::from_parts(1, 1)
 	}
+	fn on_initialize_proposals(p: u32, ) -> Weight {
+		// Proof Size summary in bytes:
+		//  Measured:  `170`
+		//  Estimated: `1501`
+		// Minimum execution time: 10_929_000 picoseconds.
+		Weight::from_parts(13_737_454, 1501)
+			// Standard Error: 790
+			.saturating_add(Weight::from_parts(33_673, 0).saturating_mul(p.into()))
+			.saturating_add(RocksDbWeight::get().reads(2_u64))
+			.saturating_add(RocksDbWeight::get().writes(2_u64))
+	}
 }
 
 // For backwards compatibility and tests
@@ -63,5 +75,16 @@ impl WeightInfo for () {
 	}
 	fn spend_local() -> Weight {
 		Weight::from_parts(1, 1)
+	}
+	fn on_initialize_proposals(p: u32, ) -> Weight {
+		// Proof Size summary in bytes:
+		//  Measured:  `170`
+		//  Estimated: `1501`
+		// Minimum execution time: 10_929_000 picoseconds.
+		Weight::from_parts(13_737_454, 1501)
+			// Standard Error: 790
+			.saturating_add(Weight::from_parts(33_673, 0).saturating_mul(p.into()))
+			.saturating_add(RocksDbWeight::get().reads(2_u64))
+			.saturating_add(RocksDbWeight::get().writes(2_u64))
 	}
 }
