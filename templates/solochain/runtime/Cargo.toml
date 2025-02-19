@@ -33,6 +33,8 @@ frame-try-runtime = { optional = true, workspace = true }
 pallet-aura = { workspace = true }
 pallet-balances = { workspace = true }
 pallet-grandpa = { workspace = true }
+pallet-conviction-voting = { workspace = true }
+pallet-referenda = { workspace = true }
 pallet-sudo = { workspace = true }
 pallet-timestamp = { workspace = true }
 pallet-transaction-payment = { workspace = true }
@@ -92,6 +94,8 @@ std = [
 	"pallet-aura/std",
 	"pallet-balances/std",
 	"pallet-grandpa/std",
+	"pallet-conviction-voting/std",
+	"pallet-referenda/std",
 	"pallet-sudo/std",
 	"pallet-projects/std",
 	"pallet-timestamp/std",
@@ -124,6 +128,8 @@ runtime-benchmarks = [
 	"pallet-balances/runtime-benchmarks",
 	"pallet-grandpa/runtime-benchmarks",
 	"pallet-sudo/runtime-benchmarks",
+	"pallet-conviction-voting/runtime-benchmarks",
+	"pallet-referenda/runtime-benchmarks",
 	"pallet-projects/runtime-benchmarks",
 	"pallet-timestamp/runtime-benchmarks",
 	"pallet-transaction-payment/runtime-benchmarks",
@@ -139,6 +145,8 @@ try-runtime = [
 	"pallet-balances/try-runtime",
 	"pallet-grandpa/try-runtime",
 	"pallet-sudo/try-runtime",
+	"pallet-referenda/try-runtime",
+	"pallet-conviction-voting/try-runtime",
 	"pallet-projects/try-runtime",
 	"pallet-timestamp/try-runtime",
 	"pallet-transaction-payment/try-runtime",

@@ -79,6 +79,10 @@ pub enum PaymentState {
 	Failed,
 }
 
+// based on the trype of proposal... on the spend proposals all voters confiction vote should be collected and added to the treasury and their eqity / reward increases drastically based on their conviction voting...
+
+// oposing votes to the final result should be slashed and added to the treasury without rewards.
+
 #[impl_trait_for_tuples::impl_for_tuples(30)]
 pub trait SpendFunds<T: Config> {
 	fn spend_funds(
